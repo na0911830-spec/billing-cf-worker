@@ -63,6 +63,12 @@ export default {
         return await handleDeleteBill(env, id);
       }
 
+      if (pathname.startsWith('/api/bills/') && pathname.endsWith('/payment') && method === 'PUT') {
+        const id = pathname.replace('/api/bills/', '').replace('/payment', '');
+        const body = await request.json();
+        return await handleUpdateBillPayment(env, id, body);
+      }
+
       if (pathname === '/api/bills' && method === 'POST') {
         const body = await request.json();
         return await handleCreateBill(env, body);
@@ -744,6 +750,56 @@ async function handleSettleFifo(env, phoneOrId, body) {
     remaining_advance: remaining,
     settlements
   });
+}
+
+async function handleUpdateBillPayment(env, idOrNumber, body) {
+  let bill = await env.DB.prepare('SELECT * FROM bills WHERE id = ?').bind(idOrNumber).first();
+  if (!bill) {
+    bill = await env.DB.prepare('SELECT * FROM bills WHERE bill_number = ?').bind(idOrNumber).first();
+  }
+  if (!bill) {
+    return jsonResponse({ error: 'Bill not found' }, 404);
+  }
+
+  const grandTotal = Number(bill.grand_total) || 0;
+  const currentPaid = Number(bill.amount_paid) || 0;
+  const currentDue = Number(bill.amount_due) || 0;
+
+  let newPaid = currentPaid;
+  let newDue = currentDue;
+
+  if (body.mark_full_paid === true) {
+    newPaid = grandTotal;
+    newDue = 0.0;
+  } else if (body.amount_add !== undefined) {
+    const addAmt = Number(body.amount_add) || 0;
+    if (addAmt <= 0) {
+      return jsonResponse({ error: 'Added payment amount must be greater than 0' }, 400);
+    }
+    newPaid = Math.round((currentPaid + addAmt) * 100) / 100;
+    newDue = Math.max(0, Math.round((grandTotal - newPaid) * 100) / 100);
+  } else if (body.amount_paid !== undefined) {
+    newPaid = Math.round(Number(body.amount_paid) * 100) / 100;
+    newDue = Math.max(0, Math.round((grandTotal - newPaid) * 100) / 100);
+  } else {
+    return jsonResponse({ error: 'Must provide amount_add, amount_paid, or mark_full_paid: true' }, 400);
+  }
+
+  let newStatus = 'Paid';
+  if (newDue > 0.001 && newPaid > 0.001) {
+    newStatus = 'Partially Paid';
+  } else if (newDue > 0.001 && newPaid <= 0.001) {
+    newStatus = 'Unpaid';
+  }
+
+  const paymentMode = body.payment_mode || bill.payment_mode || 'Cash';
+
+  await env.DB.prepare(
+    `UPDATE bills SET amount_paid = ?, amount_due = ?, payment_status = ?, payment_mode = ? WHERE id = ?`
+  ).bind(newPaid, newDue, newStatus, paymentMode, bill.id).run();
+
+  const updatedBill = await handleGetBillDetails(env, bill.id);
+  return updatedBill;
 }
 
 /* ----------------- ORDERS HANDLERS ----------------- */
