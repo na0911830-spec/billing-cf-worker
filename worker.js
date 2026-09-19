@@ -68,7 +68,68 @@ export default {
         return await handleCreateBill(env, body);
       }
 
-      // 3. Database Init / Migration Endpoint
+      // 3. API: Customers Endpoints
+      if (pathname === '/api/customers' && method === 'GET') {
+        return await handleGetCustomers(env, searchParams);
+      }
+
+      if (pathname.startsWith('/api/customers/by-phone/') && method === 'GET') {
+        const phone = decodeURIComponent(pathname.replace('/api/customers/by-phone/', ''));
+        return await handleGetCustomerByPhone(env, phone);
+      }
+
+      if (pathname === '/api/customers' && method === 'POST') {
+        const body = await request.json();
+        return await handleCreateCustomer(env, body);
+      }
+
+      if (pathname.startsWith('/api/customers/') && method === 'PUT') {
+        const id = pathname.replace('/api/customers/', '');
+        const body = await request.json();
+        return await handleUpdateCustomer(env, id, body);
+      }
+
+      if (pathname.startsWith('/api/customers/') && method === 'DELETE') {
+        const id = pathname.replace('/api/customers/', '');
+        return await handleDeleteCustomer(env, id);
+      }
+
+      // 4. API: Customer FIFO Settlement Endpoint
+      if (pathname.startsWith('/api/customers/') && pathname.endsWith('/settle-fifo') && method === 'POST') {
+        const parts = pathname.split('/');
+        const phoneOrId = parts[3];
+        const body = await request.json();
+        return await handleSettleFifo(env, phoneOrId, body);
+      }
+
+      // 5. API: Orders Endpoints (Customer & Seller)
+      if (pathname === '/api/orders' && method === 'GET') {
+        return await handleGetOrders(env, searchParams);
+      }
+
+      if (pathname.startsWith('/api/orders/') && pathname.endsWith('/status') && method === 'PUT') {
+        const orderId = pathname.replace('/api/orders/', '').replace('/status', '');
+        const body = await request.json();
+        return await handleUpdateOrderStatus(env, orderId, body);
+      }
+
+      if (pathname.startsWith('/api/orders/') && pathname.endsWith('/convert-to-bill') && method === 'POST') {
+        const orderId = pathname.replace('/api/orders/', '').replace('/convert-to-bill', '');
+        const body = await request.json();
+        return await handleConvertOrderToBill(env, orderId, body);
+      }
+
+      if (pathname.startsWith('/api/orders/') && method === 'GET') {
+        const orderId = pathname.replace('/api/orders/', '');
+        return await handleGetOrderDetails(env, orderId);
+      }
+
+      if (pathname === '/api/orders' && method === 'POST') {
+        const body = await request.json();
+        return await handleCreateOrder(env, body);
+      }
+
+      // 6. Database Init / Migration Endpoint
       if (pathname === '/api/init-db' && (method === 'POST' || method === 'GET')) {
         return await handleInitDb(env);
       }
@@ -131,26 +192,42 @@ async function handleInitDb(env) {
       mrp REAL NOT NULL DEFAULT 0.0,
       brand TEXT DEFAULT '',
       unit TEXT DEFAULT 'PCS',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`,
     `CREATE INDEX IF NOT EXISTS idx_items_barcode ON items(barcode);`,
     `CREATE INDEX IF NOT EXISTS idx_items_name ON items(name);`,
     `CREATE INDEX IF NOT EXISTS idx_items_brand ON items(brand);`,
+    `CREATE TABLE IF NOT EXISTS customers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      phone TEXT UNIQUE NOT NULL,
+      address TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);`,
+    `CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);`,
     `CREATE TABLE IF NOT EXISTS bills (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       bill_number TEXT UNIQUE NOT NULL,
+      customer_id INTEGER,
       customer_name TEXT DEFAULT 'Cash Customer',
       customer_phone TEXT DEFAULT '',
       payment_mode TEXT DEFAULT 'Cash',
       subtotal REAL NOT NULL DEFAULT 0.0,
       discount_total REAL NOT NULL DEFAULT 0.0,
       grand_total REAL NOT NULL DEFAULT 0.0,
+      amount_paid REAL NOT NULL DEFAULT 0.0,
+      amount_due REAL NOT NULL DEFAULT 0.0,
+      payment_status TEXT DEFAULT 'Paid',
       total_qty REAL NOT NULL DEFAULT 0.0,
       notes TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`,
     `CREATE INDEX IF NOT EXISTS idx_bills_bill_number ON bills(bill_number);`,
+    `CREATE INDEX IF NOT EXISTS idx_bills_created_at ON bills(created_at);`,
+    `CREATE INDEX IF NOT EXISTS idx_bills_customer_phone ON bills(customer_phone);`,
     `CREATE TABLE IF NOT EXISTS bill_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       bill_id INTEGER NOT NULL,
@@ -164,14 +241,63 @@ async function handleInitDb(env) {
       final_amount REAL NOT NULL,
       FOREIGN KEY(bill_id) REFERENCES bills(id) ON DELETE CASCADE
     );`,
-    `CREATE INDEX IF NOT EXISTS idx_bill_items_bill_id ON bill_items(bill_id);`
+    `CREATE INDEX IF NOT EXISTS idx_bill_items_bill_id ON bill_items(bill_id);`,
+    `CREATE TABLE IF NOT EXISTS orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_number TEXT UNIQUE NOT NULL,
+      customer_id INTEGER,
+      customer_name TEXT NOT NULL,
+      customer_phone TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      subtotal REAL NOT NULL DEFAULT 0.0,
+      grand_total REAL NOT NULL DEFAULT 0.0,
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_customer_phone ON orders(customer_phone);`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);`,
+    `CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);`,
+    `CREATE TABLE IF NOT EXISTS order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      item_id INTEGER,
+      barcode TEXT NOT NULL,
+      name TEXT NOT NULL,
+      mrp REAL NOT NULL,
+      qty REAL NOT NULL DEFAULT 1.0,
+      trade_disc REAL DEFAULT 0.0,
+      disc REAL DEFAULT 0.0,
+      final_amount REAL NOT NULL,
+      FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);`
   ];
 
   for (const q of queries) {
-    await env.DB.prepare(q).run();
+    try {
+      await env.DB.prepare(q).run();
+    } catch (e) {
+      console.error('Init table error:', e);
+    }
   }
 
-  return jsonResponse({ message: 'Database tables and indexes initialized successfully' });
+  // Idempotently add missing columns to bills if table existed previously
+  const alterQueries = [
+    `ALTER TABLE bills ADD COLUMN amount_paid REAL NOT NULL DEFAULT 0.0;`,
+    `ALTER TABLE bills ADD COLUMN amount_due REAL NOT NULL DEFAULT 0.0;`,
+    `ALTER TABLE bills ADD COLUMN payment_status TEXT DEFAULT 'Paid';`,
+    `ALTER TABLE bills ADD COLUMN customer_id INTEGER;`
+  ];
+  for (const aq of alterQueries) {
+    try {
+      await env.DB.prepare(aq).run();
+    } catch (_) {
+      // column already exists
+    }
+  }
+
+  return jsonResponse({ message: 'Database tables, columns, and indexes initialized successfully' });
 }
 
 async function handleGetItems(env, searchParams) {
@@ -421,6 +547,20 @@ async function handleCreateBill(env, body) {
 
   const billId = billInsert.meta.last_row_id;
 
+  // Handle payment tracking
+  const paid = body.amount_paid !== undefined ? Number(body.amount_paid) : calculatedGrandTotal;
+  const due = Math.max(0, Math.round((calculatedGrandTotal - paid) * 100) / 100);
+  let status = 'Paid';
+  if (due > 0 && paid > 0) {
+    status = 'Partially Paid';
+  } else if (due > 0 && paid <= 0) {
+    status = 'Unpaid';
+  }
+
+  await env.DB.prepare(
+    `UPDATE bills SET amount_paid = ?, amount_due = ?, payment_status = ? WHERE id = ?`
+  ).bind(paid, due, status, billId).run();
+
   // Insert bill items
   const itemInserts = processedItems.map(pi =>
     env.DB.prepare(
@@ -443,6 +583,294 @@ async function handleCreateBill(env, body) {
 
   const fullBill = await handleGetBillDetails(env, billId);
   return fullBill;
+}
+
+/* ----------------- CUSTOMER HANDLERS ----------------- */
+
+async function handleGetCustomers(env, searchParams) {
+  const query = searchParams.get('q') || '';
+  let sql = 'SELECT * FROM customers';
+  const bindings = [];
+
+  if (query.trim()) {
+    sql += ' WHERE name LIKE ? OR phone LIKE ?';
+    bindings.push(`%${query.trim()}%`, `%${query.trim()}%`);
+  }
+  sql += ' ORDER BY name ASC LIMIT 100';
+
+  const res = await env.DB.prepare(sql).bind(...bindings).all();
+  const customers = res.results || [];
+
+  // Compute total due for each customer
+  const enriched = [];
+  for (const c of customers) {
+    const dues = await env.DB.prepare(
+      `SELECT SUM(amount_due) as total_due, COUNT(*) as unpaid_bills 
+       FROM bills WHERE customer_phone = ? AND payment_status IN ('Unpaid', 'Partially Paid')`
+    ).bind(c.phone).first();
+    enriched.push({
+      ...c,
+      total_due: dues?.total_due || 0.0,
+      unpaid_bills: dues?.unpaid_bills || 0
+    });
+  }
+
+  return jsonResponse({ customers: enriched });
+}
+
+async function handleGetCustomerByPhone(env, phone) {
+  const cleanPhone = (phone || '').trim();
+  const customer = await env.DB.prepare('SELECT * FROM customers WHERE phone = ?').bind(cleanPhone).first();
+  if (!customer) {
+    return jsonResponse({ error: 'Customer not registered', registered: false }, 404);
+  }
+
+  const dues = await env.DB.prepare(
+    `SELECT SUM(amount_due) as total_due, COUNT(*) as unpaid_bills 
+     FROM bills WHERE customer_phone = ? AND payment_status IN ('Unpaid', 'Partially Paid')`
+  ).bind(cleanPhone).first();
+
+  return jsonResponse({
+    registered: true,
+    customer: {
+      ...customer,
+      total_due: dues?.total_due || 0.0,
+      unpaid_bills: dues?.unpaid_bills || 0
+    }
+  });
+}
+
+async function handleCreateCustomer(env, body) {
+  const { name, phone, address } = body;
+  if (!name || !phone) {
+    return jsonResponse({ error: 'Name and Phone are required' }, 400);
+  }
+
+  const existing = await env.DB.prepare('SELECT id FROM customers WHERE phone = ?').bind(phone.trim()).first();
+  if (existing) {
+    return jsonResponse({ error: 'Customer with this phone number already exists' }, 409);
+  }
+
+  const insert = await env.DB.prepare(
+    `INSERT INTO customers (name, phone, address) VALUES (?, ?, ?)`
+  ).bind(name.trim(), phone.trim(), (address || '').trim()).run();
+
+  const created = await env.DB.prepare('SELECT * FROM customers WHERE id = ?').bind(insert.meta.last_row_id).first();
+  return jsonResponse({ message: 'Customer created', customer: created }, 201);
+}
+
+async function handleUpdateCustomer(env, id, body) {
+  const { name, phone, address } = body;
+  const existing = await env.DB.prepare('SELECT * FROM customers WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return jsonResponse({ error: 'Customer not found' }, 404);
+  }
+
+  await env.DB.prepare(
+    `UPDATE customers SET name = ?, phone = ?, address = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).bind((name || existing.name).trim(), (phone || existing.phone).trim(), (address || existing.address).trim(), id).run();
+
+  const updated = await env.DB.prepare('SELECT * FROM customers WHERE id = ?').bind(id).first();
+  return jsonResponse({ message: 'Customer updated', customer: updated });
+}
+
+async function handleDeleteCustomer(env, id) {
+  await env.DB.prepare('DELETE FROM customers WHERE id = ?').bind(id).run();
+  return jsonResponse({ message: 'Customer deleted successfully' });
+}
+
+/* ----------------- FIFO PAYMENT SETTLEMENT ----------------- */
+
+async function handleSettleFifo(env, phoneOrId, body) {
+  const amountToSettle = Number(body.amount) || 0;
+  if (amountToSettle <= 0) {
+    return jsonResponse({ error: 'Payment amount must be greater than 0' }, 400);
+  }
+
+  // Get customer phone
+  let phone = phoneOrId;
+  if (/^\d+$/.test(phoneOrId) && phoneOrId.length < 9) {
+    const cust = await env.DB.prepare('SELECT phone FROM customers WHERE id = ?').bind(Number(phoneOrId)).first();
+    if (cust) phone = cust.phone;
+  }
+
+  // Retrieve unpaid/partially paid bills ordered by created_at ASC (FIFO)
+  const billsRes = await env.DB.prepare(
+    `SELECT id, bill_number, grand_total, amount_paid, amount_due, payment_status, created_at
+     FROM bills
+     WHERE customer_phone = ? AND payment_status IN ('Unpaid', 'Partially Paid')
+     ORDER BY id ASC`
+  ).bind(phone).all();
+
+  const unpaidBills = billsRes.results || [];
+  if (unpaidBills.length === 0) {
+    return jsonResponse({ message: 'No unpaid bills found for this customer', settledAmount: 0 });
+  }
+
+  let remaining = amountToSettle;
+  const settlements = [];
+
+  for (const bill of unpaidBills) {
+    if (remaining <= 0) break;
+
+    const due = Number(bill.amount_due) || 0;
+    const currentPaid = Number(bill.amount_paid) || 0;
+
+    const payForThisBill = Math.min(remaining, due);
+    const newPaid = Math.round((currentPaid + payForThisBill) * 100) / 100;
+    const newDue = Math.max(0, Math.round((due - payForThisBill) * 100) / 100);
+    const newStatus = newDue <= 0.001 ? 'Paid' : 'Partially Paid';
+
+    await env.DB.prepare(
+      `UPDATE bills SET amount_paid = ?, amount_due = ?, payment_status = ? WHERE id = ?`
+    ).bind(newPaid, newDue, newStatus, bill.id).run();
+
+    settlements.push({
+      bill_id: bill.id,
+      bill_number: bill.bill_number,
+      allocated: payForThisBill,
+      new_paid: newPaid,
+      new_due: newDue,
+      status: newStatus
+    });
+
+    remaining = Math.round((remaining - payForThisBill) * 100) / 100;
+  }
+
+  return jsonResponse({
+    message: 'FIFO settlement completed successfully',
+    total_received: amountToSettle,
+    total_allocated: Math.round((amountToSettle - remaining) * 100) / 100,
+    remaining_advance: remaining,
+    settlements
+  });
+}
+
+/* ----------------- ORDERS HANDLERS ----------------- */
+
+async function handleGetOrders(env, searchParams) {
+  const phone = searchParams.get('phone');
+  const status = searchParams.get('status');
+
+  let sql = 'SELECT * FROM orders';
+  const bindings = [];
+  const filters = [];
+
+  if (phone) {
+    filters.push('customer_phone = ?');
+    bindings.push(phone.trim());
+  }
+  if (status) {
+    filters.push('status = ?');
+    bindings.push(status.trim());
+  }
+
+  if (filters.length > 0) {
+    sql += ' WHERE ' + filters.join(' AND ');
+  }
+  sql += ' ORDER BY id DESC LIMIT 100';
+
+  const ordersResult = await env.DB.prepare(sql).bind(...bindings).all();
+  const orders = ordersResult.results || [];
+
+  // Enclose with items
+  const enriched = [];
+  for (const o of orders) {
+    const items = await env.DB.prepare('SELECT * FROM order_items WHERE order_id = ?').bind(o.id).all();
+    enriched.push({
+      ...o,
+      items: items.results || []
+    });
+  }
+
+  return jsonResponse({ orders: enriched });
+}
+
+async function handleGetOrderDetails(env, orderId) {
+  const order = await env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first();
+  if (!order) {
+    return jsonResponse({ error: 'Order not found' }, 404);
+  }
+  const items = await env.DB.prepare('SELECT * FROM order_items WHERE order_id = ?').bind(order.id).all();
+  return jsonResponse({ order, items: items.results || [] });
+}
+
+async function handleCreateOrder(env, body) {
+  const { customer_name, customer_phone, items, notes } = body;
+  if (!customer_phone || !items || items.length === 0) {
+    return jsonResponse({ error: 'Customer phone and items are required' }, 400);
+  }
+
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  const orderNumber = `ORD-${dateStr}-${rand}`;
+
+  let subtotal = 0;
+  for (const it of items) {
+    subtotal += (Number(it.mrp) || 0) * (Number(it.qty) || 1);
+  }
+  subtotal = Math.round(subtotal * 100) / 100;
+
+  const orderInsert = await env.DB.prepare(
+    `INSERT INTO orders (order_number, customer_name, customer_phone, status, subtotal, grand_total, notes)
+     VALUES (?, ?, ?, 'pending', ?, ?, ?)`
+  ).bind(orderNumber, (customer_name || 'Customer').trim(), customer_phone.trim(), subtotal, subtotal, notes || '').run();
+
+  const orderId = orderInsert.meta.last_row_id;
+
+  const itemInserts = items.map(it => {
+    const mrp = Number(it.mrp) || 0;
+    const qty = Number(it.qty) || 1;
+    const amt = Math.round(mrp * qty * 100) / 100;
+    return env.DB.prepare(
+      `INSERT INTO order_items (order_id, item_id, barcode, name, mrp, qty, trade_disc, disc, final_amount)
+       VALUES (?, ?, ?, ?, ?, ?, 0.0, 0.0, ?)`
+    ).bind(orderId, it.id || it.item_id || null, it.barcode || '', it.name || 'Item', mrp, qty, amt);
+  });
+
+  await env.DB.batch(itemInserts);
+  return await handleGetOrderDetails(env, orderId);
+}
+
+async function handleUpdateOrderStatus(env, orderId, body) {
+  const { status } = body;
+  const valid = ['pending', 'processed', 'out_for_delivery', 'delivered', 'cancelled'];
+  if (!valid.includes(status)) {
+    return jsonResponse({ error: `Invalid status. Must be one of: ${valid.join(', ')}` }, 400);
+  }
+
+  await env.DB.prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(status, orderId)
+    .run();
+
+  return await handleGetOrderDetails(env, orderId);
+}
+
+async function handleConvertOrderToBill(env, orderId, body) {
+  const { payment_mode, amount_paid, items } = body;
+  const orderDetails = await handleGetOrderDetails(env, orderId);
+  const orderData = await orderDetails.json();
+  if (orderData.error) {
+    return jsonResponse({ error: 'Order not found' }, 404);
+  }
+
+  const itemsToBill = items && items.length > 0 ? items : orderData.items;
+
+  // Create Bill
+  const billRes = await handleCreateBill(env, {
+    customer_name: orderData.order.customer_name,
+    customer_phone: orderData.order.customer_phone,
+    payment_mode: payment_mode || 'Cash',
+    amount_paid: amount_paid,
+    notes: `Converted from Order #${orderData.order.order_number}`,
+    items: itemsToBill
+  });
+
+  // Mark order as delivered / processed
+  await env.DB.prepare(`UPDATE orders SET status = 'delivered', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(orderId).run();
+
+  return billRes;
 }
 
 async function handleDeleteBill(env, idOrNumber) {
