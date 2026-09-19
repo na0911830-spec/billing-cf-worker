@@ -613,13 +613,6 @@
         SmartPOS
         <span class="badge-d1">Cloudflare D1</span>
       </h1>
-      
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <button class="m3-btn m3-btn-tonal m3-btn-sm" onclick="initDatabase()" title="Ensure schema tables are created">
-          <span class="material-symbols-outlined" style="font-size: 16px;">database</span>
-          <span>Init DB</span>
-        </button>
-      </div>
     </header>
 
     <!-- 1. BILLING TAB -->
@@ -768,8 +761,7 @@
               <th>Brand</th>
               <th>MRP (₹)</th>
               <th>Unit</th>
-              <th>Stock</th>
-              <th>Actions</th>
+                            <th>Actions</th>
             </tr>
           </thead>
           <tbody id="inventory-tbody">
@@ -855,10 +847,7 @@
         <label class="m3-label">Unit</label>
         <input type="text" id="modal-unit" class="m3-input" value="PCS">
       </div>
-      <div class="m3-field-wrap">
-        <label class="m3-label">Stock</label>
-        <input type="number" id="modal-stock" class="m3-input" value="100">
-      </div>
+
     </div>
 
     <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
@@ -1297,7 +1286,7 @@
           + '<td>' + (it.brand ? escapeHtml(it.brand) : '<span style="color:var(--md-sys-color-outline)">-</span>') + '</td>'
           + '<td style="font-weight: 600;">₹' + Number(it.mrp).toFixed(2) + '</td>'
           + '<td>' + escapeHtml(it.unit) + '</td>'
-          + '<td>' + it.stock + '</td>'
+         
           + '<td>'
           + '<div style="display: flex; gap: 6px;">'
           + '<button class="m3-btn m3-btn-tonal m3-btn-sm" onclick="editItemById(' + it.id + ')"><span class="material-symbols-outlined" style="font-size: 15px;">edit</span></button>'
@@ -1347,8 +1336,7 @@
     document.getElementById('modal-mrp').value = item ? item.mrp : '';
     document.getElementById('modal-brand').value = item ? item.brand : '';
     document.getElementById('modal-unit').value = item ? item.unit : 'PCS';
-    document.getElementById('modal-stock').value = item ? item.stock : '100';
-
+    
     document.getElementById('item-modal').style.display = 'flex';
   }
 
@@ -1364,8 +1352,7 @@
       mrp: parseFloat(document.getElementById('modal-mrp').value) || 0,
       brand: document.getElementById('modal-brand').value.trim(),
       unit: document.getElementById('modal-unit').value.trim(),
-      stock: parseFloat(document.getElementById('modal-stock').value) || 0
-    };
+          };
 
     if (!body.barcode || !body.name) {
       alert('Barcode and Item Name are required!');

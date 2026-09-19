@@ -58,6 +58,11 @@ export default {
         return await handleGetBillDetails(env, idOrNumber);
       }
 
+      if (pathname.startsWith('/api/bills/') && method === 'DELETE') {
+        const id = pathname.replace('/api/bills/', '');
+        return await handleDeleteBill(env, id);
+      }
+
       if (pathname === '/api/bills' && method === 'POST') {
         const body = await request.json();
         return await handleCreateBill(env, body);
@@ -126,8 +131,7 @@ async function handleInitDb(env) {
       mrp REAL NOT NULL DEFAULT 0.0,
       brand TEXT DEFAULT '',
       unit TEXT DEFAULT 'PCS',
-      stock REAL DEFAULT 0.0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`,
     `CREATE INDEX IF NOT EXISTS idx_items_barcode ON items(barcode);`,
@@ -224,16 +228,15 @@ async function handleCreateItem(env, body) {
   }
 
   const insert = await env.DB.prepare(
-    `INSERT INTO items (barcode, name, mrp, brand, unit, stock, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+    `INSERT INTO items (barcode, name, mrp, brand, unit, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
   ).bind(
     barcode.trim(),
     name.trim(),
     Number(mrp) || 0,
     (brand || '').trim(),
     unit || 'PCS',
-    Number(stock) || 0
-  ).run();
+    ).run();
 
   const newItem = await env.DB.prepare('SELECT * FROM items WHERE id = ?').bind(insert.meta.last_row_id).first();
   return jsonResponse({ message: 'Item created', item: newItem }, 201);
@@ -260,7 +263,6 @@ async function handleUpdateItem(env, id, body) {
        mrp = ?,
        brand = ?,
        unit = ?,
-       stock = ?,
        updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`
   ).bind(
@@ -269,7 +271,6 @@ async function handleUpdateItem(env, id, body) {
     mrp !== undefined ? Number(mrp) : existing.mrp,
     brand !== undefined ? brand.trim() : existing.brand,
     unit !== undefined ? unit : existing.unit,
-    stock !== undefined ? Number(stock) : existing.stock,
     id
   ).run();
 
@@ -303,16 +304,15 @@ async function handleSeedItems(env, body) {
     if (barcode && name) {
       batch.push(
         env.DB.prepare(
-          `INSERT INTO items (barcode, name, mrp, brand, unit, stock)
-           VALUES (?, ?, ?, ?, ?, ?)
+          `INSERT INTO items (barcode, name, mrp, brand, unit)
+           VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(barcode) DO UPDATE SET
              name=excluded.name,
              mrp=excluded.mrp,
              brand=excluded.brand,
              unit=excluded.unit,
-             stock=excluded.stock,
              updated_at=CURRENT_TIMESTAMP`
-        ).bind(barcode, name, mrp, brand, unit, stock)
+        ).bind(barcode, name, mrp, brand, unit)
       );
     }
   }
@@ -443,6 +443,29 @@ async function handleCreateBill(env, body) {
 
   const fullBill = await handleGetBillDetails(env, billId);
   return fullBill;
+}
+
+async function handleDeleteBill(env, idOrNumber) {
+  // Find bill first
+  let bill = null;
+  if (/^\d+$/.test(idOrNumber)) {
+    bill = await env.DB.prepare('SELECT * FROM bills WHERE id = ?').bind(Number(idOrNumber)).first();
+  }
+  if (!bill) {
+    bill = await env.DB.prepare('SELECT * FROM bills WHERE bill_number = ?').bind(idOrNumber).first();
+  }
+
+  if (!bill) {
+    return jsonResponse({ error: 'Bill not found' }, 404);
+  }
+
+  // Delete bill_items and bill
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM bill_items WHERE bill_id = ?').bind(bill.id),
+    env.DB.prepare('DELETE FROM bills WHERE id = ?').bind(bill.id)
+  ]);
+
+  return jsonResponse({ message: 'Bill deleted successfully', id: bill.id, bill_number: bill.bill_number });
 }
 
 /* ----------------- Helpers & CORS ----------------- */
@@ -1090,13 +1113,6 @@ function getAppHtml() {
         SmartPOS
         <span class="badge-d1">Cloudflare D1</span>
       </h1>
-      
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <button class="m3-btn m3-btn-tonal m3-btn-sm" onclick="initDatabase()" title="Ensure schema tables are created">
-          <span class="material-symbols-outlined" style="font-size: 16px;">database</span>
-          <span>Init DB</span>
-        </button>
-      </div>
     </header>
 
     <!-- 1. BILLING TAB -->
@@ -1245,8 +1261,7 @@ function getAppHtml() {
               <th>Brand</th>
               <th>MRP (₹)</th>
               <th>Unit</th>
-              <th>Stock</th>
-              <th>Actions</th>
+                            <th>Actions</th>
             </tr>
           </thead>
           <tbody id="inventory-tbody">
@@ -1332,10 +1347,7 @@ function getAppHtml() {
         <label class="m3-label">Unit</label>
         <input type="text" id="modal-unit" class="m3-input" value="PCS">
       </div>
-      <div class="m3-field-wrap">
-        <label class="m3-label">Stock</label>
-        <input type="number" id="modal-stock" class="m3-input" value="100">
-      </div>
+
     </div>
 
     <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
@@ -1774,7 +1786,7 @@ function getAppHtml() {
           + '<td>' + (it.brand ? escapeHtml(it.brand) : '<span style="color:var(--md-sys-color-outline)">-</span>') + '</td>'
           + '<td style="font-weight: 600;">₹' + Number(it.mrp).toFixed(2) + '</td>'
           + '<td>' + escapeHtml(it.unit) + '</td>'
-          + '<td>' + it.stock + '</td>'
+         
           + '<td>'
           + '<div style="display: flex; gap: 6px;">'
           + '<button class="m3-btn m3-btn-tonal m3-btn-sm" onclick="editItemById(' + it.id + ')"><span class="material-symbols-outlined" style="font-size: 15px;">edit</span></button>'
@@ -1824,8 +1836,7 @@ function getAppHtml() {
     document.getElementById('modal-mrp').value = item ? item.mrp : '';
     document.getElementById('modal-brand').value = item ? item.brand : '';
     document.getElementById('modal-unit').value = item ? item.unit : 'PCS';
-    document.getElementById('modal-stock').value = item ? item.stock : '100';
-
+    
     document.getElementById('item-modal').style.display = 'flex';
   }
 
@@ -1841,8 +1852,7 @@ function getAppHtml() {
       mrp: parseFloat(document.getElementById('modal-mrp').value) || 0,
       brand: document.getElementById('modal-brand').value.trim(),
       unit: document.getElementById('modal-unit').value.trim(),
-      stock: parseFloat(document.getElementById('modal-stock').value) || 0
-    };
+          };
 
     if (!body.barcode || !body.name) {
       alert('Barcode and Item Name are required!');
@@ -1911,7 +1921,10 @@ function getAppHtml() {
           + '<td>' + b.total_qty + '</td>'
           + '<td style="font-weight: 700; color: var(--md-sys-color-primary);">₹' + Number(b.grand_total).toFixed(2) + '</td>'
           + '<td>'
+          + '<div style="display: flex; gap: 6px;">'
           + '<button class="m3-btn m3-btn-tonal m3-btn-sm" onclick="viewPastBill(' + b.id + ')"><span class="material-symbols-outlined" style="font-size: 16px;">visibility</span></button>'
+          + '<button class="m3-btn m3-btn-danger m3-btn-sm" onclick="deleteBill(' + b.id + ', \\'' + escapeHtml(b.bill_number) + '\\')"><span class="material-symbols-outlined" style="font-size: 16px;">delete</span></button>'
+          + '</div>'
           + '</td>'
           + '</tr>';
       });
@@ -1933,6 +1946,22 @@ function getAppHtml() {
       }
     } catch (e) {
       alert('Error: ' + e.message);
+    }
+  }
+
+  async function deleteBill(billId, billNumber) {
+    if (!confirm('Are you sure you want to permanently delete bill ' + (billNumber || billId) + ' from the server? This cannot be undone.')) return;
+    try {
+      const res = await fetch('/api/bills/' + billId, { method: 'DELETE' });
+      if (res.ok) {
+        showToast('Bill deleted successfully');
+        loadBillsHistory();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to delete bill');
+      }
+    } catch (e) {
+      alert('Error deleting bill: ' + e.message);
     }
   }
 </script>
