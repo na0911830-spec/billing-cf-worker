@@ -1,0 +1,12 @@
+{
+  "name": "billing-cf-worker",
+  "main": "worker.js",
+  "compatibility_date": "2024-09-19",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "billing-db",
+      "database_id": "c040e629-6c63-4c95-8ed4-7e9f7f5d6767"
+    }
+  ]
+}
