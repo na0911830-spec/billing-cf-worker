@@ -309,7 +309,7 @@ async function handleInitDb(env) {
 async function handleGetItems(env, searchParams) {
   const query = searchParams.get('q') || '';
   const page = parseInt(searchParams.get('page') || '1', 10);
-  const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 200);
+  const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 5000);
   const offset = (page - 1) * limit;
 
   let sql = 'SELECT * FROM items';
@@ -498,7 +498,9 @@ async function handleCreateBill(env, body) {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  const billNumber = `BILL-${dateStr}-${randomSuffix}`;
+  const billNumber = (body.bill_number && String(body.bill_number).trim().length > 0)
+    ? String(body.bill_number).trim()
+    : `BILL-${dateStr}-${randomSuffix}`;
 
   let rawSubtotal = 0;
   let calculatedGrandTotal = 0;
