@@ -42,8 +42,8 @@ export default {
         return await handleDeleteItem(env, id);
       }
 
-      // Batch import/seed
-      if (pathname === '/api/items/seed' && method === 'POST') {
+      // Batch import/seed/sync
+      if ((pathname === '/api/items/seed' || pathname === '/api/items/batch-sync') && method === 'POST') {
         const body = await request.json();
         return await handleSeedItems(env, body);
       }
@@ -445,30 +445,40 @@ async function handleSeedItems(env, body) {
 
   const batch = [];
   for (const it of items) {
-    const barcode = it.BARCODE || it.barcode;
-    const name = it.DESCA || it.name;
+    let barcode = (it.BARCODE || it.barcode || '').toString().trim();
+    if (!barcode) {
+      barcode = (it.MENUCODE || it.MCODE || '').toString().trim();
+    }
+    const name = (it.DESCA || it.name || '').toString().trim();
     const mrp = Number(it.MRP || it.mrp || 0);
-    const unit = it.UNIT || it.unit || 'PCS';
-    const stock = Number(it.STOCK || it.stock || 0);
+    const unit = (it.UNIT || it.unit || 'PCS').toString().trim();
+    const stock = Number(it.STOCK !== undefined ? it.STOCK : (it.stock !== undefined ? it.stock : 0));
 
     if (barcode && name) {
       batch.push(
         env.DB.prepare(
-          `INSERT INTO items (barcode, name, mrp, unit)
-           VALUES (?, ?, ?, ?)
+          `INSERT INTO items (barcode, name, mrp, unit, stock)
+           VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(barcode) DO UPDATE SET
              name=excluded.name,
              mrp=excluded.mrp,
              unit=excluded.unit,
+             stock=excluded.stock,
              updated_at=CURRENT_TIMESTAMP`
-        ).bind(barcode, name, mrp, unit)
+        ).bind(barcode, name, mrp, unit, stock)
       );
     }
   }
 
-  // D1 batch execution
-  const results = await env.DB.batch(batch);
-  return jsonResponse({ message: `Successfully seeded/updated ${results.length} items.` });
+  // D1 batch execution in safe chunks of 100 statements
+  let totalProcessed = 0;
+  for (let i = 0; i < batch.length; i += 100) {
+    const chunk = batch.slice(i, i + 100);
+    const res = await env.DB.batch(chunk);
+    totalProcessed += res.length;
+  }
+
+  return jsonResponse({ message: `Successfully seeded/updated ${totalProcessed} items.`, count: totalProcessed });
 }
 
 async function handleGetBills(env, searchParams) {
