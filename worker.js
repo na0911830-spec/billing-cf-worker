@@ -211,14 +211,12 @@ async function handleInitDb(env) {
       barcode TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL,
       mrp REAL NOT NULL DEFAULT 0.0,
-      brand TEXT DEFAULT '',
       unit TEXT DEFAULT 'PCS',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`,
     `CREATE INDEX IF NOT EXISTS idx_items_barcode ON items(barcode);`,
     `CREATE INDEX IF NOT EXISTS idx_items_name ON items(name);`,
-    `CREATE INDEX IF NOT EXISTS idx_items_brand ON items(brand);`,
     `CREATE TABLE IF NOT EXISTS customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -316,7 +314,13 @@ async function handleInitDb(env) {
     } catch (_) {
       // column already exists
     }
-  }
+  // Drop brand index and column if existing
+  try {
+    await env.DB.prepare('DROP INDEX IF EXISTS idx_items_brand;').run();
+  } catch (_) {}
+  try {
+    await env.DB.prepare('ALTER TABLE items DROP COLUMN brand;').run();
+  } catch (_) {}
 
   return jsonResponse({ message: 'Database tables, columns, and indexes initialized successfully' });
 }
@@ -333,10 +337,10 @@ async function handleGetItems(env, searchParams) {
 
   if (query.trim()) {
     const term = `%${query.trim()}%`;
-    const filter = ' WHERE barcode LIKE ? OR name LIKE ? OR brand LIKE ?';
+    const filter = ' WHERE barcode LIKE ? OR name LIKE ?';
     sql += filter;
     countSql += filter;
-    bindings.push(term, term, term);
+    bindings.push(term, term);
   }
 
   sql += ' ORDER BY id DESC LIMIT ? OFFSET ?';
@@ -364,7 +368,7 @@ async function handleGetItemByBarcode(env, barcode) {
 }
 
 async function handleCreateItem(env, body) {
-  const { barcode, name, mrp, brand, unit, stock } = body;
+  const { barcode, name, mrp, unit, stock } = body;
   if (!barcode || !name) {
     return jsonResponse({ error: 'Barcode and Name are required' }, 400);
   }
@@ -375,13 +379,12 @@ async function handleCreateItem(env, body) {
   }
 
   const insert = await env.DB.prepare(
-    `INSERT INTO items (barcode, name, mrp, brand, unit, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+    `INSERT INTO items (barcode, name, mrp, unit, created_at, updated_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
   ).bind(
     barcode.trim(),
     name.trim(),
     Number(mrp) || 0,
-    (brand || '').trim(),
     unit || 'PCS',
     ).run();
 
@@ -390,7 +393,7 @@ async function handleCreateItem(env, body) {
 }
 
 async function handleUpdateItem(env, id, body) {
-  const { barcode, name, mrp, brand, unit, stock } = body;
+  const { barcode, name, mrp, unit, stock } = body;
   const existing = await env.DB.prepare('SELECT * FROM items WHERE id = ?').bind(id).first();
   if (!existing) {
     return jsonResponse({ error: 'Item not found' }, 404);
@@ -408,7 +411,6 @@ async function handleUpdateItem(env, id, body) {
        barcode = ?,
        name = ?,
        mrp = ?,
-       brand = ?,
        unit = ?,
        updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`
@@ -416,7 +418,6 @@ async function handleUpdateItem(env, id, body) {
     (barcode || existing.barcode).trim(),
     (name || existing.name).trim(),
     mrp !== undefined ? Number(mrp) : existing.mrp,
-    brand !== undefined ? brand.trim() : existing.brand,
     unit !== undefined ? unit : existing.unit,
     id
   ).run();
@@ -444,22 +445,20 @@ async function handleSeedItems(env, body) {
     const barcode = it.BARCODE || it.barcode;
     const name = it.DESCA || it.name;
     const mrp = Number(it.MRP || it.mrp || 0);
-    const brand = it.BRAND || it.brand || '';
     const unit = it.UNIT || it.unit || 'PCS';
     const stock = Number(it.STOCK || it.stock || 0);
 
     if (barcode && name) {
       batch.push(
         env.DB.prepare(
-          `INSERT INTO items (barcode, name, mrp, brand, unit)
-           VALUES (?, ?, ?, ?, ?)
+          `INSERT INTO items (barcode, name, mrp, unit)
+           VALUES (?, ?, ?, ?)
            ON CONFLICT(barcode) DO UPDATE SET
              name=excluded.name,
              mrp=excluded.mrp,
-             brand=excluded.brand,
              unit=excluded.unit,
              updated_at=CURRENT_TIMESTAMP`
-        ).bind(barcode, name, mrp, brand, unit)
+        ).bind(barcode, name, mrp, unit)
       );
     }
   }
@@ -1269,7 +1268,7 @@ function getAppHtml() {
       z-index: 10;
     }
 
-    .brand-icon-wrap {
+    .app-logo-wrap {
       width: 52px;
       height: 52px;
       background: var(--md-sys-color-primary-container);
@@ -1655,7 +1654,7 @@ function getAppHtml() {
         left: 0;
       }
 
-      .brand-icon-wrap {
+      .app-logo-wrap {
         display: none;
       }
 
@@ -1729,7 +1728,7 @@ function getAppHtml() {
 
 <div class="app-scaffold">
   <nav class="nav-rail">
-    <div class="brand-icon-wrap" title="SmartPOS Cloudflare D1">
+    <div class="app-logo-wrap" title="SmartPOS Cloudflare D1">
       <span class="material-symbols-outlined" style="font-size: 28px;">point_of_sale</span>
     </div>
     
@@ -1876,7 +1875,7 @@ function getAppHtml() {
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
         <div>
           <h2 style="font-family: var(--md-sys-typescale-title-font); font-size: 22px;">Items Catalog</h2>
-          <p style="font-size: 13px; color: var(--md-sys-color-on-surface-variant);">Manage barcodes, brands, MRP, and stock in Cloudflare D1</p>
+          <p style="font-size: 13px; color: var(--md-sys-color-on-surface-variant);">Manage barcodes, MRP, and stock in Cloudflare D1</p>
         </div>
         <div style="display: flex; gap: 10px;">
           <button class="m3-btn m3-btn-tonal" onclick="openItemModal()">
@@ -1888,7 +1887,7 @@ function getAppHtml() {
 
       <div class="m3-card" style="margin-bottom: 16px; padding: 12px 16px;">
         <div style="display: flex; gap: 12px;">
-          <input type="text" id="inventory-search" class="m3-input" placeholder="Search by Barcode, Name, or Brand..." oninput="debounceSearchInventory()">
+          <input type="text" id="inventory-search" class="m3-input" placeholder="Search by Barcode or Name..." oninput="debounceSearchInventory()">
           <button class="m3-btn m3-btn-primary" onclick="loadInventory(1)">
             <span class="material-symbols-outlined">search</span>
           </button>
@@ -1901,10 +1900,9 @@ function getAppHtml() {
             <tr>
               <th>Barcode</th>
               <th>Name</th>
-              <th>Brand</th>
               <th>MRP (₹)</th>
               <th>Unit</th>
-                            <th>Actions</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="inventory-tbody">
@@ -1981,15 +1979,10 @@ function getAppHtml() {
         <input type="number" step="0.01" id="modal-mrp" class="m3-input" required placeholder="60.00">
       </div>
       <div class="m3-field-wrap">
-        <label class="m3-label">Brand</label>
-        <input type="text" id="modal-brand" class="m3-input" placeholder="e.g. PAPAD">
-      </div>
-    </div>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-      <div class="m3-field-wrap">
         <label class="m3-label">Unit</label>
         <input type="text" id="modal-unit" class="m3-input" value="PCS">
       </div>
+    </div>
 
     </div>
 
@@ -2138,7 +2131,7 @@ function getAppHtml() {
           html += '<div class="suggestion-item" onclick="selectSuggestedItem(\\'' + it.barcode + '\\')">'
             + '<div>'
             + '<div style="font-weight: 600;">' + escapeHtml(it.name) + '</div>'
-            + '<div style="font-size: 11px; color: var(--md-sys-color-outline);">' + escapeHtml(it.barcode) + ' | ' + escapeHtml(it.brand || 'No Brand') + '</div>'
+            + '<div style="font-size: 11px; color: var(--md-sys-color-outline);">' + escapeHtml(it.barcode) + '</div>'
             + '</div>'
             + '<div style="font-weight: 700; color: var(--md-sys-color-primary);">₹' + Number(it.mrp).toFixed(2) + '</div>'
             + '</div>';
@@ -2174,7 +2167,6 @@ function getAppHtml() {
         id: item.id,
         barcode: item.barcode,
         name: item.name,
-        brand: item.brand,
         mrp: Number(item.mrp) || 0,
         qty: 1,
         trade_disc: 0,
@@ -2231,7 +2223,7 @@ function getAppHtml() {
       html += '<tr>'
         + '<td>'
         + '<div style="font-weight: 600;">' + escapeHtml(item.name) + '</div>'
-        + '<div style="font-size: 11px; color: var(--md-sys-color-outline);">' + escapeHtml(item.barcode) + (item.brand ? ' • ' + escapeHtml(item.brand) : '') + '</div>'
+        + '<div style="font-size: 11px; color: var(--md-sys-color-outline);">' + escapeHtml(item.barcode) + '</div>'
         + '</td>'
         + '<td style="font-weight: 500;">₹' + item.mrp.toFixed(2) + '</td>'
         + '<td><input type="number" step="any" min="0.01" class="qty-input" value="' + item.qty + '" onchange="updateCartItem(' + idx + ', \\'qty\\', this.value)"></td>'
@@ -2426,10 +2418,8 @@ function getAppHtml() {
         html += '<tr>'
           + '<td><code>' + escapeHtml(it.barcode) + '</code></td>'
           + '<td style="font-weight: 600;">' + escapeHtml(it.name) + '</td>'
-          + '<td>' + (it.brand ? escapeHtml(it.brand) : '<span style="color:var(--md-sys-color-outline)">-</span>') + '</td>'
           + '<td style="font-weight: 600;">₹' + Number(it.mrp).toFixed(2) + '</td>'
           + '<td>' + escapeHtml(it.unit) + '</td>'
-         
           + '<td>'
           + '<div style="display: flex; gap: 6px;">'
           + '<button class="m3-btn m3-btn-tonal m3-btn-sm" onclick="editItemById(' + it.id + ')"><span class="material-symbols-outlined" style="font-size: 15px;">edit</span></button>'
@@ -2477,7 +2467,6 @@ function getAppHtml() {
     document.getElementById('modal-barcode').value = item ? item.barcode : '';
     document.getElementById('modal-name').value = item ? item.name : '';
     document.getElementById('modal-mrp').value = item ? item.mrp : '';
-    document.getElementById('modal-brand').value = item ? item.brand : '';
     document.getElementById('modal-unit').value = item ? item.unit : 'PCS';
     
     document.getElementById('item-modal').style.display = 'flex';
@@ -2493,9 +2482,8 @@ function getAppHtml() {
       barcode: document.getElementById('modal-barcode').value.trim(),
       name: document.getElementById('modal-name').value.trim(),
       mrp: parseFloat(document.getElementById('modal-mrp').value) || 0,
-      brand: document.getElementById('modal-brand').value.trim(),
       unit: document.getElementById('modal-unit').value.trim(),
-          };
+    };
 
     if (!body.barcode || !body.name) {
       alert('Barcode and Item Name are required!');
