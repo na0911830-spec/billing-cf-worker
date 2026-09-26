@@ -136,9 +136,18 @@ export default {
         return await handleGetOrderDetails(env, orderId);
       }
 
+      if (pathname.startsWith('/api/orders/') && method === 'DELETE') {
+        const orderId = pathname.replace('/api/orders/', '');
+        return await handleDeleteOrder(env, orderId);
+      }
+
       if (pathname === '/api/orders' && method === 'POST') {
         const body = await request.json();
         return await handleCreateOrder(env, body);
+      }
+
+      if (pathname === '/api/admin/clean-slate' && (method === 'POST' || method === 'DELETE' || method === 'GET')) {
+        return await handleCleanSlate(env);
       }
 
       // 6. Database Init / Migration Endpoint
@@ -693,7 +702,12 @@ async function handleUpdateCustomer(env, id, body) {
 }
 
 async function handleDeleteCustomer(env, id) {
-  await env.DB.prepare('DELETE FROM customers WHERE id = ?').bind(id).run();
+  const num = Number(id);
+  if (!isNaN(num)) {
+    await env.DB.prepare('DELETE FROM customers WHERE id = ? OR phone = ?').bind(num, String(id)).run();
+  } else {
+    await env.DB.prepare('DELETE FROM customers WHERE phone = ?').bind(String(id)).run();
+  }
   return jsonResponse({ message: 'Customer deleted successfully' });
 }
 
@@ -939,6 +953,28 @@ async function handleConvertOrderToBill(env, orderId, body) {
   await env.DB.prepare(`UPDATE orders SET status = 'delivered', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(orderId).run();
 
   return billRes;
+}
+
+async function handleDeleteOrder(env, id) {
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM order_items WHERE order_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM orders WHERE id = ?').bind(id)
+  ]);
+  return jsonResponse({ message: 'Order deleted successfully', id });
+}
+
+async function handleCleanSlate(env) {
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM bill_items'),
+    env.DB.prepare('DELETE FROM bills'),
+    env.DB.prepare('DELETE FROM order_items'),
+    env.DB.prepare('DELETE FROM orders'),
+    env.DB.prepare('DELETE FROM customer_payments'),
+    env.DB.prepare('DELETE FROM customers')
+  ]);
+  return jsonResponse({
+    message: 'Clean slate: All bills, orders, and customers wiped. Inventory (items) preserved intact.'
+  });
 }
 
 async function handleUpdateBill(env, idOrNumber, body) {
