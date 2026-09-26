@@ -126,7 +126,7 @@
       z-index: 10;
     }
 
-    .brand-icon-wrap {
+    .app-logo-wrap {
       width: 52px;
       height: 52px;
       background: var(--md-sys-color-primary-container);
@@ -512,7 +512,7 @@
         left: 0;
       }
 
-      .brand-icon-wrap {
+      .app-logo-wrap {
         display: none;
       }
 
@@ -586,7 +586,7 @@
 
 <div class="app-scaffold">
   <nav class="nav-rail">
-    <div class="brand-icon-wrap" title="SmartPOS Cloudflare D1">
+    <div class="app-logo-wrap" title="SmartPOS Cloudflare D1">
       <span class="material-symbols-outlined" style="font-size: 28px;">point_of_sale</span>
     </div>
     
@@ -733,7 +733,7 @@
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
         <div>
           <h2 style="font-family: var(--md-sys-typescale-title-font); font-size: 22px;">Items Catalog</h2>
-          <p style="font-size: 13px; color: var(--md-sys-color-on-surface-variant);">Manage barcodes, brands, MRP, and stock in Cloudflare D1</p>
+          <p style="font-size: 13px; color: var(--md-sys-color-on-surface-variant);">Manage barcodes, MRP, and stock in Cloudflare D1</p>
         </div>
         <div style="display: flex; gap: 10px;">
           <button class="m3-btn m3-btn-tonal" onclick="openItemModal()">
@@ -745,7 +745,7 @@
 
       <div class="m3-card" style="margin-bottom: 16px; padding: 12px 16px;">
         <div style="display: flex; gap: 12px;">
-          <input type="text" id="inventory-search" class="m3-input" placeholder="Search by Barcode, Name, or Brand..." oninput="debounceSearchInventory()">
+          <input type="text" id="inventory-search" class="m3-input" placeholder="Search by Barcode or Name..." oninput="debounceSearchInventory()">
           <button class="m3-btn m3-btn-primary" onclick="loadInventory(1)">
             <span class="material-symbols-outlined">search</span>
           </button>
@@ -758,10 +758,9 @@
             <tr>
               <th>Barcode</th>
               <th>Name</th>
-              <th>Brand</th>
               <th>MRP (₹)</th>
               <th>Unit</th>
-                            <th>Actions</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="inventory-tbody">
@@ -838,15 +837,10 @@
         <input type="number" step="0.01" id="modal-mrp" class="m3-input" required placeholder="60.00">
       </div>
       <div class="m3-field-wrap">
-        <label class="m3-label">Brand</label>
-        <input type="text" id="modal-brand" class="m3-input" placeholder="e.g. PAPAD">
-      </div>
-    </div>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-      <div class="m3-field-wrap">
         <label class="m3-label">Unit</label>
         <input type="text" id="modal-unit" class="m3-input" value="PCS">
       </div>
+    </div>
 
     </div>
 
@@ -995,7 +989,7 @@
           html += '<div class="suggestion-item" onclick="selectSuggestedItem(\'' + it.barcode + '\')">'
             + '<div>'
             + '<div style="font-weight: 600;">' + escapeHtml(it.name) + '</div>'
-            + '<div style="font-size: 11px; color: var(--md-sys-color-outline);">' + escapeHtml(it.barcode) + ' | ' + escapeHtml(it.brand || 'No Brand') + '</div>'
+            + '<div style="font-size: 11px; color: var(--md-sys-color-outline);">' + escapeHtml(it.barcode) + '</div>'
             + '</div>'
             + '<div style="font-weight: 700; color: var(--md-sys-color-primary);">₹' + Number(it.mrp).toFixed(2) + '</div>'
             + '</div>';
@@ -1031,7 +1025,6 @@
         id: item.id,
         barcode: item.barcode,
         name: item.name,
-        brand: item.brand,
         mrp: Number(item.mrp) || 0,
         qty: 1,
         trade_disc: 0,
@@ -1088,7 +1081,7 @@
       html += '<tr>'
         + '<td>'
         + '<div style="font-weight: 600;">' + escapeHtml(item.name) + '</div>'
-        + '<div style="font-size: 11px; color: var(--md-sys-color-outline);">' + escapeHtml(item.barcode) + (item.brand ? ' • ' + escapeHtml(item.brand) : '') + '</div>'
+        + '<div style="font-size: 11px; color: var(--md-sys-color-outline);">' + escapeHtml(item.barcode) + '</div>'
         + '</td>'
         + '<td style="font-weight: 500;">₹' + item.mrp.toFixed(2) + '</td>'
         + '<td><input type="number" step="any" min="0.01" class="qty-input" value="' + item.qty + '" onchange="updateCartItem(' + idx + ', \'qty\', this.value)"></td>'
@@ -1283,10 +1276,8 @@
         html += '<tr>'
           + '<td><code>' + escapeHtml(it.barcode) + '</code></td>'
           + '<td style="font-weight: 600;">' + escapeHtml(it.name) + '</td>'
-          + '<td>' + (it.brand ? escapeHtml(it.brand) : '<span style="color:var(--md-sys-color-outline)">-</span>') + '</td>'
           + '<td style="font-weight: 600;">₹' + Number(it.mrp).toFixed(2) + '</td>'
           + '<td>' + escapeHtml(it.unit) + '</td>'
-         
           + '<td>'
           + '<div style="display: flex; gap: 6px;">'
           + '<button class="m3-btn m3-btn-tonal m3-btn-sm" onclick="editItemById(' + it.id + ')"><span class="material-symbols-outlined" style="font-size: 15px;">edit</span></button>'
@@ -1334,7 +1325,6 @@
     document.getElementById('modal-barcode').value = item ? item.barcode : '';
     document.getElementById('modal-name').value = item ? item.name : '';
     document.getElementById('modal-mrp').value = item ? item.mrp : '';
-    document.getElementById('modal-brand').value = item ? item.brand : '';
     document.getElementById('modal-unit').value = item ? item.unit : 'PCS';
     
     document.getElementById('item-modal').style.display = 'flex';
@@ -1350,9 +1340,8 @@
       barcode: document.getElementById('modal-barcode').value.trim(),
       name: document.getElementById('modal-name').value.trim(),
       mrp: parseFloat(document.getElementById('modal-mrp').value) || 0,
-      brand: document.getElementById('modal-brand').value.trim(),
       unit: document.getElementById('modal-unit').value.trim(),
-          };
+    };
 
     if (!body.barcode || !body.name) {
       alert('Barcode and Item Name are required!');

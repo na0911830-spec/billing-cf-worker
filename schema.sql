@@ -6,15 +6,14 @@ CREATE TABLE IF NOT EXISTS items (
     barcode TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     mrp REAL NOT NULL DEFAULT 0.0,
-    brand TEXT DEFAULT '',
     unit TEXT DEFAULT 'PCS',
+    stock REAL NOT NULL DEFAULT 0.0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_barcode ON items(barcode);
 CREATE INDEX IF NOT EXISTS idx_items_name ON items(name);
-CREATE INDEX IF NOT EXISTS idx_items_brand ON items(brand);
 
 -- CUSTOMERS TABLE
 CREATE TABLE IF NOT EXISTS customers (

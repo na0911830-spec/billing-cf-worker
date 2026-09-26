@@ -379,13 +379,14 @@ async function handleCreateItem(env, body) {
   }
 
   const insert = await env.DB.prepare(
-    `INSERT INTO items (barcode, name, mrp, unit, created_at, updated_at)
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+    `INSERT INTO items (barcode, name, mrp, unit, stock, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
   ).bind(
     barcode.trim(),
     name.trim(),
     Number(mrp) || 0,
     unit || 'PCS',
+    Number(stock) || 0,
     ).run();
 
   const newItem = await env.DB.prepare('SELECT * FROM items WHERE id = ?').bind(insert.meta.last_row_id).first();
@@ -412,6 +413,7 @@ async function handleUpdateItem(env, id, body) {
        name = ?,
        mrp = ?,
        unit = ?,
+       stock = ?,
        updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`
   ).bind(
@@ -419,6 +421,7 @@ async function handleUpdateItem(env, id, body) {
     (name || existing.name).trim(),
     mrp !== undefined ? Number(mrp) : existing.mrp,
     unit !== undefined ? unit : existing.unit,
+    stock !== undefined ? Number(stock) : (existing.stock || 0),
     id
   ).run();
 
