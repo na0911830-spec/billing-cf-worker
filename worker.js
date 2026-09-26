@@ -969,7 +969,6 @@ async function handleCleanSlate(env) {
     env.DB.prepare('DELETE FROM bills'),
     env.DB.prepare('DELETE FROM order_items'),
     env.DB.prepare('DELETE FROM orders'),
-    env.DB.prepare('DELETE FROM customer_payments'),
     env.DB.prepare('DELETE FROM customers')
   ]);
   return jsonResponse({
