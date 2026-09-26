@@ -69,6 +69,12 @@ export default {
         return await handleUpdateBillPayment(env, id, body);
       }
 
+      if (pathname.startsWith('/api/bills/') && method === 'PUT') {
+        const id = pathname.replace('/api/bills/', '');
+        const body = await request.json();
+        return await handleUpdateBill(env, id, body);
+      }
+
       if (pathname === '/api/bills' && method === 'POST') {
         const body = await request.json();
         return await handleCreateBill(env, body);
@@ -556,13 +562,17 @@ async function handleCreateBill(env, body) {
   const billId = billInsert.meta.last_row_id;
 
   // Handle payment tracking
-  const paid = body.amount_paid !== undefined ? Number(body.amount_paid) : calculatedGrandTotal;
+  const paid = body.amount_paid !== undefined
+    ? Number(body.amount_paid)
+    : (body.payment_status === 'Pending' ? 0.0 : calculatedGrandTotal);
   const due = Math.max(0, Math.round((calculatedGrandTotal - paid) * 100) / 100);
-  let status = 'Paid';
-  if (due > 0 && paid > 0) {
-    status = 'Partially Paid';
-  } else if (due > 0 && paid <= 0) {
-    status = 'Unpaid';
+  let status = body.payment_status || 'Paid';
+  if (!body.payment_status) {
+    if (due > 0 && paid > 0) {
+      status = 'Partially Paid';
+    } else if (due > 0 && paid <= 0) {
+      status = 'Unpaid';
+    }
   }
 
   await env.DB.prepare(
@@ -929,6 +939,118 @@ async function handleConvertOrderToBill(env, orderId, body) {
   await env.DB.prepare(`UPDATE orders SET status = 'delivered', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(orderId).run();
 
   return billRes;
+}
+
+async function handleUpdateBill(env, idOrNumber, body) {
+  let bill = null;
+  if (/^\d+$/.test(idOrNumber)) {
+    bill = await env.DB.prepare('SELECT * FROM bills WHERE id = ?').bind(Number(idOrNumber)).first();
+  }
+  if (!bill) {
+    bill = await env.DB.prepare('SELECT * FROM bills WHERE bill_number = ?').bind(idOrNumber).first();
+  }
+  if (!bill) {
+    return jsonResponse({ error: 'Bill not found' }, 404);
+  }
+
+  const billId = bill.id;
+  const items = body.items;
+
+  if (items && Array.isArray(items) && items.length > 0) {
+    let rawSubtotal = 0;
+    let calculatedGrandTotal = 0;
+    let totalQty = 0;
+    const processedItems = [];
+
+    for (const it of items) {
+      const mrp = Number(it.mrp) || 0;
+      const qty = Number(it.qty) || 1;
+      const tradeDisc = Number(it.trade_disc || it.tradedisc || 0);
+      const disc = Number(it.disc || 0);
+
+      rawSubtotal += mrp * qty;
+      totalQty += qty;
+
+      const lineTotal = calculateItemTotal(mrp, qty, tradeDisc, disc);
+      calculatedGrandTotal += lineTotal;
+
+      processedItems.push({
+        item_id: it.id || it.item_id || null,
+        barcode: it.barcode || '',
+        name: it.name || 'Unknown Item',
+        mrp,
+        qty,
+        trade_disc: tradeDisc,
+        disc,
+        final_amount: lineTotal
+      });
+    }
+
+    rawSubtotal = Math.round(rawSubtotal * 100) / 100;
+    calculatedGrandTotal = Math.round(calculatedGrandTotal * 100) / 100;
+    const discountTotal = Math.round((rawSubtotal - calculatedGrandTotal) * 100) / 100;
+
+    const paid = body.amount_paid !== undefined
+      ? Number(body.amount_paid)
+      : (body.payment_status === 'Pending' ? 0.0 : calculatedGrandTotal);
+    const due = Math.max(0, Math.round((calculatedGrandTotal - paid) * 100) / 100);
+    let status = body.payment_status || 'Paid';
+    if (!body.payment_status) {
+      if (due > 0 && paid > 0) status = 'Partially Paid';
+      else if (due > 0 && paid <= 0) status = 'Unpaid';
+    }
+
+    await env.DB.prepare(
+      `UPDATE bills SET
+         customer_name = ?,
+         customer_phone = ?,
+         payment_mode = ?,
+         subtotal = ?,
+         discount_total = ?,
+         grand_total = ?,
+         amount_paid = ?,
+         amount_due = ?,
+         payment_status = ?,
+         total_qty = ?,
+         notes = ?
+       WHERE id = ?`
+    ).bind(
+      (body.customer_name !== undefined ? body.customer_name : bill.customer_name).trim(),
+      (body.customer_phone !== undefined ? body.customer_phone : bill.customer_phone).trim(),
+      body.payment_mode || bill.payment_mode,
+      rawSubtotal,
+      discountTotal,
+      calculatedGrandTotal,
+      paid,
+      due,
+      status,
+      totalQty,
+      body.notes !== undefined ? body.notes : bill.notes,
+      billId
+    ).run();
+
+    // Replace items
+    await env.DB.prepare('DELETE FROM bill_items WHERE bill_id = ?').bind(billId).run();
+    const itemInserts = processedItems.map(pi =>
+      env.DB.prepare(
+        `INSERT INTO bill_items (bill_id, item_id, barcode, name, mrp, qty, trade_disc, disc, final_amount)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        billId,
+        pi.item_id,
+        pi.barcode,
+        pi.name,
+        pi.mrp,
+        pi.qty,
+        pi.trade_disc,
+        pi.disc,
+        pi.final_amount
+      )
+    );
+    await env.DB.batch(itemInserts);
+  }
+
+  return await handleGetBillDetails(env, billId);
 }
 
 async function handleDeleteBill(env, idOrNumber) {
