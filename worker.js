@@ -461,7 +461,7 @@ async function handleSeedItems(env, body) {
            VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(barcode) DO UPDATE SET
              name=excluded.name,
-             mrp=CASE WHEN excluded.mrp > 0 THEN excluded.mrp ELSE items.mrp END,
+             mrp=items.mrp,
              unit=excluded.unit,
              stock=excluded.stock,
              updated_at=CURRENT_TIMESTAMP`
